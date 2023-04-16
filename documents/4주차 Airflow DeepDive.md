@@ -13,7 +13,7 @@
 
 이 경우의 문제를 해결하기 위해선 트랜잭션을 적용해야한다.
 
-아니면 접근하는 경우를 트리거링 해주는 경우를 제어하던가.
+아니면 접근하는 경우를 제어하던가.
 
 #### Q3) 하루동안 데이터가 쌓이고 이것들에 대한 처리를 00:00:00 으로 하는게 아니라 약간의 마진을 두고 시작하고 싶다. 딜레이를 줘서. 이런 경우는 어떻게 하는가? 
 
@@ -21,7 +21,7 @@
 - DAG 의 트리거링은 `start_date` 와 `schedule_interval` 을 바탕으로 시작된다. 
   - start_date 를 2022 년 1월 1일 이고 schedule_interval 이 10 * * * * 이라면 매일 0시 10분에 시작된다.
   - `schedule_interval` 을 명시하지 않으면 once 로 처리되서 한번만 실행된다.
-  - 데이터 파이프라인이 실행되면 해당 읽을 데이터의 시간이 `execution_date` 에 들어가게 된다. 
+  - 데이터 파이프라인이 실행되면 해당 읽어야 할 데이터의 시간이 `execution_date` 에 들어가게 된다. 
 
 #### Python Airflow Example code 
 
@@ -105,11 +105,10 @@ task = PythonOperator(
 - 적용하려면 `BEGIN` 과 `END` 사이 혹은 `BEGIN` 과 `COMMIT` 사이에 해당 SQL 문들을 넣어야한다.
 
 트랜잭션을 쓸 때 auto commit 여부가 중요하다.
-- 기본적으로 auto commit 은 각각의 SQL 문은 바로바로 커밋된다. 
+- 기본적으로 auto commit 은 활성화 되어 있으며 각각의 SQL 문은 바로바로 커밋된다. 
   - 이를 바꾸고 싶다면 `BEGIN` `END` 혹은 `BEGIN` `COMMIT` 을 해야한다.
-- auto commit 을 하지 않는다면 기본적으로 SQL 문은 바로바로 커밋되지 않는다. 명시적으로 `commit` 이나 `rollback` 을 홏출해줘야한다.
+- auto commit 을 하지 않는다면 기본적으로 SQL 문은 바로바로 커밋되지 않는다. 명시적으로 `commit` 이나 `rollback` 을 수동적으로 호출해줘야한다.
 - 여러개의 데이터베이스에 작업을 할 땐 개별적으로 롤백을 해야할 수 있으므로 이 경우에는 auto commit 을 하지 않는게 더 나을 수 있다고 한다. 
-- 그리고 auto commit 이 활성화 된 경우에는 여러 쿼리를 하나로 묶기 어려워서 롤백이 어려울 수 있다고 하는데 이 경우를 좀 더 봐야겠다. 각 쿼리가 개별적으로 실행된다고함.
 
 ```python
 try:
@@ -127,18 +126,18 @@ finally :
 - 실패했을 경우에 명확하게 ROLLBACK 호출해주는 예시.
 - 데이터 엔지니어의 좋은 마인드셋은 실패했을 때 깔끔하게 돌려놓는게 좋다. (물론 그게 상관없는 데이터들도 있다.)
   - 정합성이 중요한 데이터들을 다룰 때.
-- **여기서 또 중요한 건 catch 로 예외를 전파한 후 발생한 예외를 raise 해서 볼 수 있도록 해야한다.**  
+- **여기서 또 중요한 건 catch 로 예외를 전파한 후 발생한 예외를 raise 해서 발생한 예외를 개발자들이 볼 수 있도록 해야한다.**  
 
 ### Auto commit 
 
 MySQL 기준으로 모든 user 의 activity 는 트랜잭션 내애서 발생한다. 그리고 connection 에서 session 이 시작되면 기본적으로 auto commit 이 enabled 가 되어있음.
 
-그리고 각각의 sql 문 자체가 transaction 으로 되어있음. 
+그리고 각각의 sql 문 자체가 transaction 으로 되어있음.
+- 그래서 그냥 각각의 SQL 문마다 `START TRANSACTIOn`, `END` 로 둘러쌓여있는 것과 같음.
 - 이게 싫다면, 즉 여러 SQL 문을 트랜잭션으로 하고 싶다면 `START TRANSACTION` or `BEGIN` 으로 시작해야한다. auto commit 모두가 활성화된 상태에서도 이게 가능함.
-- 그래서 그냥 모든 SQL 문에 `START TRANSACTIOn`, `END` 로 둘러쌓여있는 것과 같음.
 
 **커밋을 한다는 것 자체는 다른 세션에서 이제 이 변화를 볼 수 있다는 것임.** 
-- commit 과 rollback 은 innodb 의 모든 lock 을 release 한다.
+- 그리고 commit 과 rollback 은 innodb 의 모든 lock 을 release 한다.
 
 ## Airflow 설치 
 
@@ -151,6 +150,7 @@ MySQL 기준으로 모든 user 의 activity 는 트랜잭션 내애서 발생한
   - ubuntu: 메인 어카운트 
   - postgres: postgres 접근을 위해서 airflow 가 별도로 생성함. 
   - airflow: airflow 실행을 위한 어카운트 
+- 권한은 필요한 권한만 주도록 해야한다.
 
 - 버전 같은 경우는 메이저 대기업에서 적용하는 버전을 보고 그거 적용.
 
@@ -202,7 +202,7 @@ print_hello >> print_goodbye
 
 ### 중요한 태그 파라미터 
 
-- `max_active_runs`: 한번에 실행될 수 있는 최대 dag instnce 의 수 
+- `max_active_runs`: 한번에 실행될 수 있는 최대 dag instance 의 수 
   - full refresh 를 하는 경우에는 1로 설정되야함.
 - `max_active_tasks`: 한번에 실행될 수 있는 테스크의 수. (병렬성) 
 - `catchup`: 과거의 실행되야 할 dag 를 놓친 경우에 backfill 을 할건지의 여부.
@@ -212,6 +212,7 @@ print_hello >> print_goodbye
 ![](./image/python%20operator.png)
 
 - 가장 기본적인 python operator. 파이썬 함수 하나로 결정.
+- cxt 파라미터에 airflow 에서 task 에 필요한 정보들을 넣어준다.
 
 ## 실습) NameGender 파이프라인 개선 
 
@@ -643,9 +644,13 @@ for d in f.json()["daily"]:
 - 임시 테이블을 만들고 거기에다가 데이터들을 다 복사한다. 새로운 데이터까지. 
 - 그리고 ROW_NUMBER() 을 통해서 primary key 를 partition 으로 나누고 최신 데이터 기준으로 정렬한 뒤 첫 번째 데이터를 가져오는 SQL 을 만들고 그걸로 원본 테이블과 swap 한다.
   - 원본 테이블을 DROP 하고 임시 테이블을 원본 테이블로 바꿔준다. (ALTER)
-- ROW_NUMBER() 는 결과 집합에서 각 행에 순차 번호를 부여하는데 사용한다. 그리고 이를 이용하면 1순위 데이터만 추출해서 가져올 수 있다. 
+- ROW_NUMBER() 는 결과 집합에서 각 행에 순차 번호를 부여하는데 사용한다. 그리고 이를 이용하면 1순위 데이터만 추출해서 가져올 수 있다.
+- ALTER 이 실패헐 수도 있기 때문에 트랜잭션 적용을 해야한다. 대신에 잠금이 걸려서 그 동안 원본 테이블에 접근할 수 없음. 
+  - 이 방빕이 아래 방법보다 더 나은듯. 잠금의 비용은 비슷한데 아래의 방법은 쓰기가 두 번 생기는 것이니까. 
+  - DROP 한 후 ALTER 이 생각보다 빠르다고 한다. 
 
 위의 방법과 유사하지만 또 다른 방법으로는 임시 테이블을 만들고 거기에다가 레코드를 넣고 새로운 데이터도 넣은 다음에 (중복될 가능성 당연 있음.) 그리고 원본 테이블의 데이터를 삭제하고, 임시 테이블에서 중복을 제거한 뒤 원본 테이블에 넣는 방법.
+- 이런 방법들도 트랜잭션 적용을 해야한다. 
 
 ![](./image/apply%20primary%20uniqueness%20using%20temp%20table.png)
 
