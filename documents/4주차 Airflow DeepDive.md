@@ -139,6 +139,9 @@ MySQL 기준으로 모든 user 의 activity 는 트랜잭션 내애서 발생한
 **커밋을 한다는 것 자체는 다른 세션에서 이제 이 변화를 볼 수 있다는 것임.** 
 - 그리고 commit 과 rollback 은 innodb 의 모든 lock 을 release 한다.
 
+
+**커넥션을 가지고올 때 auto commit 을 false 로 해야함.**
+
 ## Airflow 설치 
 
 ![](./image/airflow%20installiation.png)
@@ -644,13 +647,32 @@ for d in f.json()["daily"]:
 - 임시 테이블을 만들고 거기에다가 데이터들을 다 복사한다. 새로운 데이터까지. 
 - 그리고 ROW_NUMBER() 을 통해서 primary key 를 partition 으로 나누고 최신 데이터 기준으로 정렬한 뒤 첫 번째 데이터를 가져오는 SQL 을 만들고 그걸로 원본 테이블과 swap 한다.
   - 원본 테이블을 DROP 하고 임시 테이블을 원본 테이블로 바꿔준다. (ALTER)
+
+```python
+# 임시 테이블 생성 
+create_sql = f"""DROP TABLE IF EXISTS {schema}.temp_{table};
+CREATE TABLE {schema}.temp_{table} (LIKE {schema}.{table} INCLUDING DEFAULTS);INSERT INTO {schema}.temp_{table} SELECT * FROM {schema}.{table};"""
+```
+- **임시 테이블을 생성할 때 원본 테이블과 똑같은 스키마와 제약조건을 가지고 생성하도록 해야한다.** 
+
 - ROW_NUMBER() 는 결과 집합에서 각 행에 순차 번호를 부여하는데 사용한다. 그리고 이를 이용하면 1순위 데이터만 추출해서 가져올 수 있다.
 - ALTER 이 실패헐 수도 있기 때문에 트랜잭션 적용을 해야한다. 대신에 잠금이 걸려서 그 동안 원본 테이블에 접근할 수 없음. 
-  - 이 방빕이 아래 방법보다 더 나은듯. 잠금의 비용은 비슷한데 아래의 방법은 쓰기가 두 번 생기는 것이니까. 
+  - 이 방빕이 아래 방법보다 더 나은듯. 잠금의 비용은 비슷한데 아래의 방법은 쓰기가 두 번 생기는 것이니까. (대신에 다른 방법은 테이블을 안날려도 되니까 WHERE 절에서 불필요한 것만 지우고 다시 넣으면 됨.) 
   - DROP 한 후 ALTER 이 생각보다 빠르다고 한다. 
 
 위의 방법과 유사하지만 또 다른 방법으로는 임시 테이블을 만들고 거기에다가 레코드를 넣고 새로운 데이터도 넣은 다음에 (중복될 가능성 당연 있음.) 그리고 원본 테이블의 데이터를 삭제하고, 임시 테이블에서 중복을 제거한 뒤 원본 테이블에 넣는 방법.
-- 이런 방법들도 트랜잭션 적용을 해야한다. 
+- 이런 방법들도 트랜잭션 적용을 해야한다.
+- 이런 방법들은 테이블 자체를 안날려도 되니까 그런 점에서는 좋다. 
+
+```sql
+ alter_sql = f"""DELETE FROM {schema}.{table};
+    INSERT INTO {schema}.{table}
+    SELECT date, temp, min_temp, max_temp FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY date ORDER BY created_date DESC) seq
+      FROM {schema}.temp_{table}
+  )
+    WHERE seq = 1;"""
+```
 
 ![](./image/apply%20primary%20uniqueness%20using%20temp%20table.png)
 
@@ -672,8 +694,15 @@ FROM ranked_employees
 WHERE rank = 1;
 ```
 
+## 복습 체크리스트 
+
+<details>
+<summary> Full Refresh 를 하는 경우 생기는 문제점들은? 그리고 이를 해결하는 방법은? </summary>
+
+</details>
 
 
+<details> 
+<summary> Primary Uniqueness 를 보장하는 방법은? </summary>
 
-
-
+</details>

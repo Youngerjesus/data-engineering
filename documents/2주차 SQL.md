@@ -101,3 +101,18 @@ JOIN 고려할 때 주의할 점
   - OneToOne, OneToMany, ManyToOne, ManyToMany. 이 관계에 맞춰서 조인 결과도 나올 것이니.
 
 - 어느 테이블을 드라이빙 테이블로 잡을지 생각해야한다.
+
+## 복습 체크리스트 
+
+<details>
+<summary> 조인할 때 신경써야 할 점들은? </summary>
+
+</details>
+
+
+<details>
+<summary> Order By 를 사용할 때 주의할 점은? </summary>
+
+
+
+</details>
