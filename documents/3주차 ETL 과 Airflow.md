@@ -132,18 +132,61 @@ customer_id | purchase_date | amount | most_recent_purchase
 
 데이터 파이프라인 프레임워크 
 
-Airflow 는 총 5개의 컴포넌트로 구성된다. 
+Airflow 의 컴포넌트는 다음과 같다.  
 - Web Server (flask)
+  - 사용자 인터페이스를 나타낸다. DAG 와 Task 의 상태와 실행을 시각화하고 워크 플로우를 관리한다. 
+
 - Scheduler 
   - 정해진 시간에 트리거되거나 데이터 파이프라인이 끝나면 특정 데이터 파이프라인을 트리거하거나
-  - job 을 실행하는 역할을 한다.
+  - job (= DAG) 을 실행하는 역할을 한다. DAG 를 읽고 Task 실행 순서를 결정한 다음 Task 를 Executor 에게 넘긴다. 
+
 - Worker 
-  - 서버의 수를 말한다. 
-  - 스케일아웃을 하면 worker 가 늘어난다.
+  - 분산 환경에서 실행하는 프로세스이자 머신. Standalone 일 땐 LocalExecutor 를 사용되고 이 때 워커는 안쓰인다.
+  분산 환경에서는 Celery 를 통해서 Task 를 받아서 실행한다. 이 때 CeleryExecutor 를 사용한다.
+    - Celery 의 구현체로 Redis 나 RabbitMQ 를 쓰는 것. 
+  - Worker 에 Executor 가 포함되는 구조라고 보면 된다. 
+    - 분산 환경에서는 CeleryExecutor 를 쓰고, 단일 노드에서는 LocalExecutor 를 쓴다.
+    - CeleryExecutor 를 쓰면 작업은 여러 머신에 있는 Worker 에게 분산됨 . 
+  - 서버의 수를 말한다. 스케일아웃을 하면 worker 가 늘어난다.
   - k8s 를 쓴다면 또 달라짐 
-- Database (sqlite 가 기본.)
-- Queue (멀티노드 구성인 경우에 사용됨.)
+
+- Executor
+  - Task 를 실행하는데 관련. 병렬 실행도 관리.
+  - ex) `SequentialExecutor`, `LocalExecutor`, `CeleryExecutor` 등이 있다.
+
+- Queue
+  - 작업을 대기열에 넣어서 병렬 처리나 특정 작업을 특정 Worker 에 할당하기 위해서 사용한다.
+  - 이 작업을 위해서 Redis 나 RabbitMQ 와 같은 메시지 큐 서비스를 이용할 수도 있다.
+  - 각 작업은 실행 시 우선순위를 가질 수 있으며, Worker 는 Queue 에서 가지고 와서 처리한다.
+  - 멀티노드 구성 (= 분산 처리 환경) 인 경우에 사용됨.
   - 이 경우 Executor 가 달라진다.
+
+- Database
+  - Airflow 의 메타데이터를 저장한다. Task Instance 와 DAG 실행 내역 등을 저장한다. 
+  - 기본적으로 SQLite 를 이용하며, Postgresql, MySQL 등을 사용할 수도 있다. 
+
+
+- DAG 
+  - 작업 흐름을 나타내는 방향성 비순환 그래프. 
+
+- Operator 
+  - Task 를 생성하는데 쓰인다. 
+  - ex) `BashOperator`, `PythonOperator`, `EmailOperator` 가 있다. 
+
+- Task 
+  - 개별 작업 단위. 
+  - 각 작업은 실행, 재실행, 상태 추적을 가진다. 
+
+- Task Instance
+  - 특정 시점에서 실행한 Task 를 말한다. 
+  - Task 실행 상태와 메타데이터를 포함한다. 
+
+
+- 분산 환경에서의 Airflow 의 실행과정 
+  - 1) Scheduler 가 모든 DAG 를 스캔하고 트리거 할 Task 를 결정한다.
+  - 2) Scheduler 는 특정 Task 를 Celery 에게 전달한다. (Celery 는 Redis 나 RabbitMQ 가 될 수 있음.)
+  - 3) Worker 는 메시지 브로커로부터 작업을 가지고 온다. 작업을 실행한 후 상태를 Celery 와 공유한다.
+  - 4) 작업이 완료되면 Worker 는 Celery 에게 알려준다. 그러면 Scheduler 는 작업을 처리하고 상태를 업데이트 한다.  
 
 ![](./image/airflow%20component.png)
 
@@ -207,9 +250,10 @@ DAG 같은 경우는 테스크가 일렬로 (t1 -> t2 -> t3) 로 실행될 수�
   - 멱등성이란 여러번 실행해도 결과가 같은 것을 말한다.
 
 - 실패한 데이터 파이프라인을 재실행하기 쉬워야한다.
+
 - 과거 데이터를 다시 채우는 (backfill) 이 쉬워야한다.
   - 과거의 데이터가 잘못되서 다시 채워야하는 경우를 말함.
-- Airflow 는 특히 backfill 에 강하다.
+  - Airflow 는 특히 backfill 에 강하다.
 
 - 데이터 파이프라인의 입력과 출력을 문서화하고 명확히 해야한다. 
 
@@ -217,7 +261,7 @@ DAG 같은 경우는 테스크가 일렬로 (t1 -> t2 -> t3) 로 실행될 수�
 
 - 데이터 파이프라인 사고마다 사고 레포트를 써야한다.
 
-- 중요한 데이터 파이프라인의 입력과 출력을 확인해봐야한다. 
+- 데이터의 입력과 출력을 통해 특징을 봐야한다. 확인해봐야한다. 
   - summary 테이블을 만들어내고 primary key 의 unique 함이 보장되는지
   - 중복되는 데이터와 레코드가 있는지
   - 입력 레코드의 수와 출력 레코드의 수를 확인해보는 것.
